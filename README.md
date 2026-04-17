@@ -3,6 +3,7 @@
 Contingency access portal for `https://intramac.intermacassist.com/`
 when users can't reach it directly due to Supabase DNS/HTTPS resolution issues.
 
+
 ## Structure
 
 ```
