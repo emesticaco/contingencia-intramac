@@ -29,6 +29,9 @@ module.exports = async (req, res) => {
 
   const forwardHeaders = { ...req.headers };
   forwardHeaders['host'] = targetHost;
+  // Supabase checks origin/referer — must match the app's allowed origin
+  forwardHeaders['origin'] = 'https://intramac.intermacassist.com';
+  forwardHeaders['referer'] = 'https://intramac.intermacassist.com/';
   delete forwardHeaders['connection'];
   delete forwardHeaders['transfer-encoding'];
 
