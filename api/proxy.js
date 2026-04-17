@@ -1,16 +1,35 @@
 const https = require('https');
-const http = require('http');
 const url = require('url');
 
 const TARGET = 'https://intramac.intermacassist.com';
 const targetParsed = url.parse(TARGET);
 
-module.exports = async (req, res) => {
-  // Strip /proxy prefix to get the actual path
-  const rawPath = req.url.replace(/^\/proxy/, '') || '/';
-  const fullPath = rawPath.startsWith('/') ? rawPath : '/' + rawPath;
+const ERROR_PAGE = (title, msg, detail = '') => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:monospace;background:#0a0c0f;color:#e8eaf0;
+       display:flex;align-items:center;justify-content:center;
+       height:100vh;flex-direction:column;gap:16px}
+  h2{color:#ff4d6a;letter-spacing:.08em;font-size:18px}
+  p{color:#555d6b;font-size:12px;text-align:center;max-width:360px;line-height:1.7}
+  code{color:#00e5a0;background:rgba(0,229,160,.08);padding:2px 6px;border-radius:3px}
+  button{margin-top:4px;background:none;border:1px solid #ff4d6a;color:#ff4d6a;
+         font-family:monospace;font-size:12px;letter-spacing:.06em;
+         padding:8px 22px;border-radius:4px;cursor:pointer}
+  button:hover{background:rgba(255,77,106,.1)}
+  .badge{font-size:10px;color:#00b87a;background:rgba(0,229,160,.07);
+         border:1px solid rgba(0,229,160,.18);border-radius:4px;
+         padding:3px 8px;letter-spacing:.08em}
+</style></head>
+<body>
+  <span class="badge">🌐 US RELAY — intermac contingency</span>
+  <h2>${title}</h2>
+  <p>${msg}${detail ? `<br><br><code>${detail}</code>` : ''}</p>
+  <button onclick="location.reload()">RETRY</button>
+</body></html>`;
 
-  // Forward all original headers except host
+module.exports = async (req, res) => {
   const forwardHeaders = { ...req.headers };
   forwardHeaders['host'] = targetParsed.hostname;
   delete forwardHeaders['connection'];
@@ -19,42 +38,24 @@ module.exports = async (req, res) => {
   const options = {
     hostname: targetParsed.hostname,
     port: 443,
-    path: fullPath,
+    path: req.url || '/',
     method: req.method,
     headers: forwardHeaders,
-    timeout: 25000,
+    timeout: 8000,
   };
 
-  const protocol = targetParsed.protocol === 'https:' ? https : http;
-
   return new Promise((resolve) => {
-    const proxy = protocol.request(options, (proxyRes) => {
-      // Build clean response headers
+    const proxy = https.request(options, (proxyRes) => {
       const responseHeaders = {};
       for (const [key, value] of Object.entries(proxyRes.headers)) {
         const lower = key.toLowerCase();
-        // Strip headers that block iframe embedding
         if (lower === 'x-frame-options') continue;
         if (lower === 'content-security-policy') continue;
         if (lower === 'content-security-policy-report-only') continue;
-        // Rewrite absolute redirects to go through proxy
-        if (lower === 'location') {
-          const loc = value;
-          if (loc.startsWith(TARGET)) {
-            responseHeaders[key] = loc.replace(TARGET, '/proxy');
-          } else {
-            responseHeaders[key] = loc;
-          }
-          continue;
-        }
         responseHeaders[key] = value;
       }
-
-      // Allow embedding from anywhere
-      responseHeaders['content-security-policy'] = "frame-ancestors *";
-      // Allow cookies to work cross-origin
+      responseHeaders['x-proxied-by'] = 'intermac-contingency-us';
       responseHeaders['access-control-allow-origin'] = '*';
-      responseHeaders['access-control-allow-credentials'] = 'true';
 
       res.writeHead(proxyRes.statusCode, responseHeaders);
       proxyRes.pipe(res, { end: true });
@@ -63,15 +64,22 @@ module.exports = async (req, res) => {
 
     proxy.on('error', (e) => {
       console.error('Proxy error:', e.message);
-      res.writeHead(502, { 'Content-Type': 'text/plain' });
-      res.end('502 – Proxy error: ' + e.message);
+      res.writeHead(502, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(ERROR_PAGE(
+        'RELAY ERROR',
+        'Cannot reach <code>intramac.intermacassist.com</code> through this relay.',
+        e.message
+      ));
       resolve();
     });
 
     proxy.on('timeout', () => {
       proxy.destroy();
-      res.writeHead(504, { 'Content-Type': 'text/plain' });
-      res.end('504 – Gateway timeout');
+      res.writeHead(504, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(ERROR_PAGE(
+        'RELAY TIMEOUT',
+        'Gateway timeout while connecting to <code>intramac.intermacassist.com</code>.'
+      ));
       resolve();
     });
 
