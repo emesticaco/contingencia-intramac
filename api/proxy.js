@@ -16,9 +16,8 @@ self.addEventListener('fetch', event => {
   const url = event.request.url;
   if (!SB_RE.test(url)) return;
 
-  const parsed = new URL(url);
   const origin = new URL(self.registration.scope).origin;
-  const newUrl = origin + '/sb/' + parsed.host + parsed.pathname + parsed.search + parsed.hash;
+  const newUrl = origin + '/api/sb?_u=' + encodeURIComponent(url);
 
   event.respondWith(
     fetch(new Request(newUrl, event.request)).catch(err => new Response(
@@ -50,7 +49,7 @@ const INJECT_SCRIPT = `<script data-contingency="1">
     if(typeof u!=='string')return u;
     var m=u.match(SB);
     if(!m)return u;
-    return location.origin+'/sb/'+m[1].replace(/^https?:\\/\\//,'')+( m[2]||'/');
+    return location.origin+'/api/sb?_u='+encodeURIComponent(u);
   }
   var oF=window.fetch;
   window.fetch=function(r,i){

@@ -1,8 +1,9 @@
 const https = require('https');
+const http = require('http');
+const url = require('url');
 
-// Proxies Supabase API calls server-side so DNS resolves from US, not client
-// Incoming: /sb/project.supabase.co/rest/v1/...
-// Forwards to: https://project.supabase.co/rest/v1/...
+// Receives: /api/sb?_u=https%3A%2F%2Fproject.supabase.co%2F...
+// Forwards to the decoded Supabase URL server-side (DNS from US, not client)
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
@@ -15,33 +16,30 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // Strip /sb/ prefix → "project.supabase.co/rest/v1/..."
-  const withoutPrefix = (req.url || '/').replace(/^\/sb\//, '');
-  const slashIdx = withoutPrefix.indexOf('/');
-  const targetHost = slashIdx === -1 ? withoutPrefix : withoutPrefix.slice(0, slashIdx);
-  const targetPath = slashIdx === -1 ? '/' : withoutPrefix.slice(slashIdx);
+  const parsed = url.parse(req.url, true);
+  const targetUrlStr = parsed.query._u;
 
-  if (!targetHost.endsWith('.supabase.co')) {
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Forbidden');
+  if (!targetUrlStr || !targetUrlStr.includes('.supabase.co')) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'missing or invalid _u parameter', got: targetUrlStr }));
     return;
   }
 
-  // Only forward the headers Supabase/PostgREST actually needs.
-  // Forwarding all browser headers (cookies, UA, accept-encoding, etc.) causes 400.
-  const forwardHeaders = {
-    'host': targetHost,
-    'accept': 'application/json',
-  };
-  const pass = ['apikey', 'authorization', 'content-type', 'prefer',
+  const t = url.parse(targetUrlStr);
+  const targetHost = t.hostname;
+  const targetPath = t.path; // includes pathname + query string
+
+  const forwardHeaders = { host: targetHost, accept: 'application/json' };
+  const keep = ['apikey', 'authorization', 'content-type', 'prefer',
                 'x-client-info', 'x-supabase-api-version', 'range'];
-  for (const h of pass) {
+  for (const h of keep) {
     if (req.headers[h]) forwardHeaders[h] = req.headers[h];
   }
 
+  const protocol = t.protocol === 'https:' ? https : http;
   const options = {
     hostname: targetHost,
-    port: 443,
+    port: t.protocol === 'https:' ? 443 : 80,
     path: targetPath,
     method: req.method,
     headers: forwardHeaders,
@@ -49,7 +47,7 @@ module.exports = async (req, res) => {
   };
 
   return new Promise((resolve) => {
-    const proxy = https.request(options, (proxyRes) => {
+    const proxy = protocol.request(options, (proxyRes) => {
       const outHeaders = { ...proxyRes.headers };
       outHeaders['access-control-allow-origin'] = '*';
       outHeaders['access-control-allow-headers'] = '*';
@@ -62,7 +60,6 @@ module.exports = async (req, res) => {
     });
 
     proxy.on('error', e => {
-      console.error('Supabase relay error:', e.message);
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'supabase_relay_error', detail: e.message }));
       resolve();
