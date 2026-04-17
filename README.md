@@ -38,6 +38,8 @@ After deploy you'll get a URL like `https://intermac-proxy.vercel.app`.
 ## Notes
 
 - Vercel free tier: **10s** function timeout
+
+- 
 - Vercel Pro: **60s** function timeout
 - WebSockets / SSE are not supported through serverless functions
 - Cookies and sessions should work for standard HTTP navigation
