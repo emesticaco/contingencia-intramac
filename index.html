@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intermac Assist – Access Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a0c0f;
+      --surface:  #111418;
+      --border:   #1e2229;
+      --accent:   #00e5a0;
+      --accent2:  #00b87a;
+      --text:     #e8eaf0;
+      --muted:    #555d6b;
+      --danger:   #ff4d6a;
+      --bar-h:    42px;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      overflow: hidden;
+    }
+
+    /* ── TOP BAR ──────────────────────────────────────────── */
+    #bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: var(--bar-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      z-index: 1000;
+      user-select: none;
+    }
+
+    #bar .logo {
+      font-family: 'Syne', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+
+    #bar .sep {
+      width: 1px; height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    #status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.4s;
+    }
+    #status-dot.ok    { background: var(--accent); box-shadow: 0 0 6px var(--accent2); }
+    #status-dot.error { background: var(--danger); }
+    #status-dot.pulse { animation: pulse 1.2s ease-in-out infinite; }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    #status-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      transition: color 0.4s;
+    }
+    #status-label.ok    { color: var(--accent); }
+    #status-label.error { color: var(--danger); }
+
+    .spacer { flex: 1; }
+
+    #url-pill {
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 10px;
+      letter-spacing: 0.04em;
+    }
+
+    #btn-reload {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: border-color .2s, color .2s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #btn-reload:hover { border-color: var(--accent); color: var(--accent); }
+    #btn-reload svg { width: 12px; height: 12px; }
+
+    #region-badge {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      color: var(--accent2);
+      background: rgba(0,229,160,.07);
+      border: 1px solid rgba(0,229,160,.18);
+      border-radius: 4px;
+      padding: 3px 8px;
+      flex-shrink: 0;
+    }
+
+    /* ── IFRAME ───────────────────────────────────────────── */
+    #frame-wrap {
+      position: fixed;
+      top: var(--bar-h);
+      left: 0; right: 0; bottom: 0;
+    }
+
+    #proxy-frame {
+      width: 100%; height: 100%;
+      border: none;
+      background: #fff;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+    #proxy-frame.loaded { opacity: 1; }
+
+    /* ── LOADING OVERLAY ──────────────────────────────────── */
+    #overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      z-index: 10;
+      transition: opacity 0.4s, visibility 0.4s;
+    }
+    #overlay.hidden { opacity: 0; visibility: hidden; }
+
+    .loader-ring {
+      width: 44px; height: 44px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loader-text {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+    }
+
+    /* ── ERROR OVERLAY ────────────────────────────────────── */
+    #error-overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 11;
+    }
+    #error-overlay.visible { display: flex; }
+
+    .err-icon { font-size: 32px; line-height: 1; }
+    .err-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      color: var(--danger);
+      letter-spacing: 0.04em;
+    }
+    .err-body {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      max-width: 340px;
+      line-height: 1.7;
+    }
+    #btn-retry {
+      margin-top: 4px;
+      background: none;
+      border: 1px solid var(--danger);
+      color: var(--danger);
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      padding: 7px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    #btn-retry:hover { background: rgba(255,77,106,.1); }
+
+    /* ── BLOCKED NOTICE ───────────────────────────────────── */
+    #blocked-notice {
+      position: absolute;
+      inset: 0;
+      background: var(--bg);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 12;
+      padding: 32px;
+    }
+    #blocked-notice.visible { display: flex; }
+
+    .blocked-icon { font-size: 36px; }
+    .blocked-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+      color: var(--text);
+    }
+    .blocked-body {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      max-width: 420px;
+      line-height: 1.8;
+    }
+    .blocked-body code {
+      color: var(--accent);
+      background: rgba(0,229,160,.07);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .btn-open {
+      background: var(--accent);
+      color: #0a0c0f;
+      font-family: 'DM Mono', monospace;
+      font-weight: 500;
+      font-size: 12px;
+      letter-spacing: 0.07em;
+      padding: 9px 24px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: opacity .2s;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-open:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+
+  <div id="bar">
+    <span class="logo">INTERMAC ASSIST</span>
+    <div class="sep"></div>
+    <div id="status-dot" class="pulse"></div>
+    <span id="status-label">CONNECTING…</span>
+    <div class="spacer"></div>
+    <span id="url-pill">intermacassist.com</span>
+    <span id="region-badge">🌐 US RELAY</span>
+    <button id="btn-reload" onclick="reloadFrame()">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13.5 8A5.5 5.5 0 1 1 10 3.07"/>
+        <polyline points="10 1 10 4 13 4"/>
+      </svg>
+      RELOAD
+    </button>
+  </div>
+
+  <div id="frame-wrap">
+
+    <div id="overlay">
+      <div class="loader-ring"></div>
+      <span class="loader-text">ESTABLISHING SECURE RELAY…</span>
+    </div>
+
+    <div id="error-overlay">
+      <span class="err-icon">⚠️</span>
+      <span class="err-title">CONNECTION FAILED</span>
+      <p class="err-body">
+        Unable to reach <strong>intramac.intermacassist.com</strong> through this relay.<br/>
+        Check that the Vercel deployment is live and try again.
+      </p>
+      <button id="btn-retry" onclick="reloadFrame()">RETRY</button>
+    </div>
+
+    <div id="blocked-notice">
+      <span class="blocked-icon">🔒</span>
+      <span class="blocked-title">Iframe Embedding Blocked</span>
+      <p class="blocked-body">
+        The server returned headers preventing embedding.<br/>
+        The proxy function should be stripping <code>X-Frame-Options</code> and
+        <code>Content-Security-Policy</code> — check your Vercel function logs.
+      </p>
+      <a class="btn-open" href="https://intramac.intermacassist.com" target="_blank" rel="noopener">
+        OPEN DIRECTLY ↗
+      </a>
+    </div>
+
+    <iframe
+      id="proxy-frame"
+      title="Intermac Assist"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation allow-downloads"
+      loading="eager"
+    ></iframe>
+
+  </div>
+
+  <script>
+    const PROXY_ROOT = '/proxy';
+    const TIMEOUT_MS = 20000;
+
+    const frame      = document.getElementById('proxy-frame');
+    const overlay    = document.getElementById('overlay');
+    const errOverlay = document.getElementById('error-overlay');
+    const blocked    = document.getElementById('blocked-notice');
+    const dot        = document.getElementById('status-dot');
+    const label      = document.getElementById('status-label');
+
+    let timeoutHandle = null;
+
+    function setStatus(state, text) {
+      dot.className = state;
+      label.className = state;
+      label.textContent = text;
+    }
+
+    function showBlocked() {
+      overlay.classList.add('hidden');
+      errOverlay.classList.remove('visible');
+      blocked.classList.add('visible');
+      setStatus('error', 'BLOCKED BY CSP');
+    }
+
+    function showError() {
+      overlay.classList.add('hidden');
+      blocked.classList.remove('visible');
+      errOverlay.classList.add('visible');
+      setStatus('error', 'CONNECTION FAILED');
+    }
+
+    function showLoaded() {
+      clearTimeout(timeoutHandle);
+      overlay.classList.add('hidden');
+      errOverlay.classList.remove('visible');
+      blocked.classList.remove('visible');
+      frame.classList.add('loaded');
+      setStatus('ok', 'CONNECTED');
+    }
+
+    function reloadFrame() {
+      frame.classList.remove('loaded');
+      overlay.classList.remove('hidden');
+      errOverlay.classList.remove('visible');
+      blocked.classList.remove('visible');
+      setStatus('pulse', 'CONNECTING…');
+
+      clearTimeout(timeoutHandle);
+      timeoutHandle = setTimeout(showError, TIMEOUT_MS);
+
+      frame.src = PROXY_ROOT + '/?_t=' + Date.now();
+    }
+
+    frame.addEventListener('load', () => {
+      try {
+        const loc = frame.contentWindow.location.href;
+        if (loc === 'about:blank' && frame.src !== 'about:blank') {
+          showBlocked();
+          return;
+        }
+      } catch (e) {
+        // cross-origin = proxy is working fine
+      }
+      showLoaded();
+    });
+
+    frame.addEventListener('error', showError);
+
+    // Boot
+    timeoutHandle = setTimeout(showError, TIMEOUT_MS);
+    frame.src = PROXY_ROOT + '/';
+    setStatus('pulse', 'CONNECTING…');
+  </script>
+</body>
+</html>
