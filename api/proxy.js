@@ -4,43 +4,64 @@ const url = require('url');
 const TARGET = 'https://intramac.intermacassist.com';
 const targetParsed = url.parse(TARGET);
 
-// Injected as first script in <head> — rewrites Supabase calls at runtime
-// before the SPA's fetch/XHR ever leave the browser.
-const INTERCEPTOR_SCRIPT = `<script data-contingency="1">
+// Service worker served at /sw-contingency.js
+// Intercepts ALL fetch calls at network level — can't be bypassed by bundled code
+const SW_CODE = `
+const SB_RE = /^https?:\\/\\/[a-zA-Z0-9\\-]+\\.supabase\\.co/;
+
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+
+self.addEventListener('fetch', event => {
+  const url = event.request.url;
+  if (!SB_RE.test(url)) return;
+
+  const parsed = new URL(url);
+  const origin = new URL(self.registration.scope).origin;
+  const newUrl = origin + '/sb/' + parsed.host + parsed.pathname + parsed.search + parsed.hash;
+
+  event.respondWith(
+    fetch(new Request(newUrl, event.request)).catch(err => new Response(
+      JSON.stringify({ error: 'sb_relay_failed', detail: err.message }),
+      { status: 502, headers: { 'Content-Type': 'application/json' } }
+    ))
+  );
+});
+`.trim();
+
+// Injected into <head> — registers SW and falls back to window.fetch patch
+const INJECT_SCRIPT = `<script data-contingency="1">
 (function(){
+  // Service worker (primary — intercepts at network level)
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/sw-contingency.js',{scope:'/'}).then(function(reg){
+      if(!navigator.serviceWorker.controller){
+        // First install: reload once SW is active so it can intercept from the start
+        navigator.serviceWorker.addEventListener('controllerchange',function(){
+          window.location.reload();
+        });
+      }
+    }).catch(function(e){ console.warn('[relay] SW failed:',e); });
+  }
+
+  // window.fetch patch (fallback for browsers with SW issues)
   var SB=/^(https?:\\/\\/[a-zA-Z0-9\\-]+\\.supabase\\.co)(.*)?$/;
   function rw(u){
     if(typeof u!=='string')return u;
     var m=u.match(SB);
     if(!m)return u;
-    var host=m[1].replace(/^https?:\\/\\//,'');
-    return location.origin+'/sb/'+host+(m[2]||'/');
+    return location.origin+'/sb/'+m[1].replace(/^https?:\\/\\//,'')+( m[2]||'/');
   }
-  var oFetch=window.fetch;
-  window.fetch=function(r,init){
+  var oF=window.fetch;
+  window.fetch=function(r,i){
     if(typeof r==='string')r=rw(r);
     else if(r&&r.url){var n=rw(r.url);if(n!==r.url)r=new Request(n,r);}
-    return oFetch.call(this,r,init);
+    return oF.call(this,r,i);
   };
-  var oOpen=XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open=function(method,u){
-    return oOpen.apply(this,[method,rw(u)].concat([].slice.call(arguments,2)));
+  var oX=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(m,u){
+    return oX.apply(this,[m,rw(u)].concat([].slice.call(arguments,2)));
   };
-  // WebSocket (Supabase Realtime)
-  var oWS=window.WebSocket;
-  window.WebSocket=function(u,p){
-    var m=u.match(/^wss?:\\/\\/([a-zA-Z0-9\\-]+\\.supabase\\.co)(.*)?$/);
-    if(m){
-      var wsBase=location.origin.replace(/^https/,'wss').replace(/^http/,'ws');
-      u=wsBase+'/sb-ws/'+m[1]+(m[2]||'/');
-    }
-    return p?new oWS(u,p):new oWS(u);
-  };
-  window.WebSocket.prototype=oWS.prototype;
-  window.WebSocket.CONNECTING=oWS.CONNECTING;
-  window.WebSocket.OPEN=oWS.OPEN;
-  window.WebSocket.CLOSING=oWS.CLOSING;
-  window.WebSocket.CLOSED=oWS.CLOSED;
 })();
 </script>`;
 
@@ -63,26 +84,37 @@ code{color:#00e5a0;background:rgba(0,229,160,.08);padding:2px 6px;border-radius:
 button{background:none;border:1px solid #ff4d6a;color:#ff4d6a;font-family:monospace;font-size:12px;letter-spacing:.06em;padding:8px 22px;border-radius:4px;cursor:pointer}
 .badge{font-size:10px;color:#00b87a;background:rgba(0,229,160,.07);border:1px solid rgba(0,229,160,.18);border-radius:4px;padding:3px 8px;letter-spacing:.08em}</style></head>
 <body><span class="badge">&#127760; US RELAY &mdash; intermac contingency</span>
-<h2>${title}</h2><p>${msg}${detail?`<br><br><code>${detail}</code>`:''}</p>
+<h2>${title}</h2><p>${msg}${detail ? `<br><br><code>${detail}</code>` : ''}</p>
 <button onclick="location.reload()">RETRY</button></body></html>`;
 
 function injectHead(html) {
-  // Inject interceptor as first script in <head> so it runs before the SPA bundle
-  if (html.includes('<head>')) return html.replace('<head>', '<head>' + INTERCEPTOR_SCRIPT);
-  if (html.includes('<head ')) return html.replace(/<head[^>]*>/, m => m + INTERCEPTOR_SCRIPT);
-  if (html.includes('<html')) return html.replace(/<html[^>]*>/, m => m + INTERCEPTOR_SCRIPT);
-  return INTERCEPTOR_SCRIPT + html;
+  if (html.includes('<head>')) return html.replace('<head>', '<head>' + INJECT_SCRIPT);
+  const m = html.match(/<head[^>]*>/);
+  if (m) return html.replace(m[0], m[0] + INJECT_SCRIPT);
+  if (html.includes('<html')) return html.replace(/<html[^>]*>/, t => t + INJECT_SCRIPT);
+  return INJECT_SCRIPT + html;
 }
 
 function injectBar(html) {
-  const idx = html.lastIndexOf('</body>');
-  if (idx !== -1) return html.slice(0, idx) + TOP_BAR + html.slice(idx);
-  const idx2 = html.lastIndexOf('</html>');
-  if (idx2 !== -1) return html.slice(0, idx2) + TOP_BAR + html.slice(idx2);
+  const i = html.lastIndexOf('</body>');
+  if (i !== -1) return html.slice(0, i) + TOP_BAR + html.slice(i);
+  const j = html.lastIndexOf('</html>');
+  if (j !== -1) return html.slice(0, j) + TOP_BAR + html.slice(j);
   return html + TOP_BAR;
 }
 
 module.exports = async (req, res) => {
+  // Serve service worker directly — do not proxy to target
+  if (req.url === '/sw-contingency.js') {
+    res.writeHead(200, {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store',
+      'Service-Worker-Allowed': '/',
+    });
+    res.end(SW_CODE);
+    return;
+  }
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'access-control-allow-origin': '*',
@@ -98,7 +130,7 @@ module.exports = async (req, res) => {
   forwardHeaders['host'] = targetParsed.hostname;
   delete forwardHeaders['connection'];
   delete forwardHeaders['transfer-encoding'];
-  delete forwardHeaders['accept-encoding']; // keep responses uncompressed for injection
+  delete forwardHeaders['accept-encoding'];
 
   const options = {
     hostname: targetParsed.hostname,
