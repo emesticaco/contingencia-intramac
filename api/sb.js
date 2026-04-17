@@ -27,13 +27,17 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const forwardHeaders = { ...req.headers };
-  forwardHeaders['host'] = targetHost;
-  // Supabase checks origin/referer — must match the app's allowed origin
-  forwardHeaders['origin'] = 'https://intramac.intermacassist.com';
-  forwardHeaders['referer'] = 'https://intramac.intermacassist.com/';
-  delete forwardHeaders['connection'];
-  delete forwardHeaders['transfer-encoding'];
+  // Only forward the headers Supabase/PostgREST actually needs.
+  // Forwarding all browser headers (cookies, UA, accept-encoding, etc.) causes 400.
+  const forwardHeaders = {
+    'host': targetHost,
+    'accept': 'application/json',
+  };
+  const pass = ['apikey', 'authorization', 'content-type', 'prefer',
+                'x-client-info', 'x-supabase-api-version', 'range'];
+  for (const h of pass) {
+    if (req.headers[h]) forwardHeaders[h] = req.headers[h];
+  }
 
   const options = {
     hostname: targetHost,
