@@ -29,12 +29,17 @@ module.exports = async (req, res) => {
   const targetHost = t.hostname;
   const targetPath = t.path; // includes pathname + query string
 
-  const forwardHeaders = { host: targetHost, accept: 'application/json' };
-  const keep = ['apikey', 'authorization', 'content-type', 'prefer',
-                'x-client-info', 'x-supabase-api-version', 'range'];
+  const forwardHeaders = { host: targetHost };
+  // 'accept' must be forwarded: supabase-js .single() relies on
+  // Accept: application/vnd.pgrst.object+json to get a single object back.
+  // Forcing application/json makes PostgREST return an array and breaks .single().
+  const keep = ['accept', 'apikey', 'authorization', 'content-type', 'prefer',
+                'x-client-info', 'x-supabase-api-version', 'range',
+                'accept-profile', 'content-profile'];
   for (const h of keep) {
     if (req.headers[h]) forwardHeaders[h] = req.headers[h];
   }
+  if (!forwardHeaders['accept']) forwardHeaders['accept'] = 'application/json';
 
   const protocol = t.protocol === 'https:' ? https : http;
   const options = {
